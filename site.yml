@@ -1,0 +1,84 @@
+# file: site.yml
+#based off of directions here: https://www.linuxbabe.com/bittorrent/deluge-bittorrent-client-ubuntu-16-04
+---
+- hosts: deluge
+  become: true
+  become_user: root
+  vars_files:
+    - host_vars/samba_credentials.yml
+  vars:
+    cifs_mounts:
+      - name: my_mount
+        mount_point: /mnt/piratecove
+        share_uri: //samba-cheez/piratecove
+        # local user and groups to hold ownership on mounted share
+        local_user: deluge
+        local_group: deluge
+
+        # cifs authentication informations
+        cifs_domain: \
+        cifs_username: "{{samba_user}}"
+        cifs_password: "{{samba_password}}"
+  pre_tasks:
+    - name: install pip
+      apt: name=python-pip
+    - name: create deluge group
+      group:
+        name: deluge
+        state: present
+    - name: create deluge username
+      user:
+        name: deluge
+        uid: 1040
+        group: deluge
+        home: /home/deluge
+        shell: /bin/bash
+        system: yes
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: ~/.ssh/deluge_key
+    - name: Allow 'wheel' group to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^deluge'
+        line: 'deluge ALL=(ALL) NOPASSWD: ALL'
+    - name: Add sudoers users to wheel group
+      user:
+        name: "{{ item }}"
+        groups: deluge
+        append: yes
+      with_items:
+        - deluge
+  roles:
+    - {role: cifs-client, tags: ['cifs']}
+  tasks:
+    - name: add apt repo for deluge
+      apt_repository: repo='ppa:deluge-team/ppa'
+    - name: add deluge and deluge-webui
+      apt: name={{item}}
+      with_items:
+        - deluged
+        - deluge
+        - deluge-webui
+    - name: add deluged.service template
+      template:
+        src: 'templates/deluged.service.j2'
+        dest: '/etc/systemd/system/deluged.service'
+    - name: make sure deluged auto starts
+      systemd:
+        name: deluged
+        enabled: yes
+    - name: start deluged
+      service: name=deluged state=started
+      become: yes
+      become_user: root
+    - name: add deluge-webui.service template
+      template:
+        src: 'templates/deluge-web.service.j2'
+        dest: '/etc/systemd/system/deluge-web.service'
+    - name: start and enable deluge-webui
+      systemd:
+        name: deluge-web
+        enabled: yes
+        state: started
